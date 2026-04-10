@@ -17,7 +17,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // handle preflight لكل الـ routes
+// app.options(); // handle preflight لكل الـ routes
 
 // ── Security & Parsing ────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: false }));
