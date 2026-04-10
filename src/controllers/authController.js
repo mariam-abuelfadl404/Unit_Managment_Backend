@@ -13,11 +13,16 @@ const generateToken = (id) => {
 // تسجيل مستخدم جديد
 // ═══════════════════════════════════════════════════════════
 exports.register = async (req, res) => {
+  console.log('📌 [register] route hit');
+  console.log('📌 [register] req.body:', JSON.stringify(req.body));
+
   try {
     const { username, password, fullName, email, role } = req.body;
 
-    // التحقق من وجود المستخدم
+    console.log('📌 [register] searching for existing user...');
     const userExists = await User.findOne({ username });
+    console.log('📌 [register] userExists:', userExists ? 'YES' : 'NO');
+
     if (userExists) {
       return res.status(400).json({
         success: false,
@@ -25,7 +30,7 @@ exports.register = async (req, res) => {
       });
     }
 
-    // إنشاء مستخدم جديد
+    console.log('📌 [register] creating user...');
     const user = await User.create({
       username,
       password,
@@ -33,6 +38,7 @@ exports.register = async (req, res) => {
       email,
       role: role || 'viewer'
     });
+    console.log('📌 [register] user created:', user._id);
 
     const token = generateToken(user._id);
 
@@ -50,6 +56,9 @@ exports.register = async (req, res) => {
       message: 'تم التسجيل بنجاح'
     });
   } catch (error) {
+    console.error('❌ [register] error name:', error.name);
+    console.error('❌ [register] error message:', error.message);
+    console.error('❌ [register] error stack:', error.stack);
     res.status(500).json({
       success: false,
       error: error.message
@@ -61,10 +70,10 @@ exports.register = async (req, res) => {
 // تسجيل الدخول
 // ═══════════════════════════════════════════════════════════
 exports.login = async (req, res) => {
+  console.log('📌 [login] route hit');
   try {
     const { username, password } = req.body;
 
-    // التحقق من وجود البيانات
     if (!username || !password) {
       return res.status(400).json({
         success: false,
@@ -72,7 +81,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // البحث عن المستخدم
     const user = await User.findOne({ username }).select('+password');
     if (!user) {
       return res.status(401).json({
@@ -81,7 +89,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // التحقق من كلمة المرور
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({
@@ -90,7 +97,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // التحقق من أن الحساب نشط
     if (!user.isActive) {
       return res.status(401).json({
         success: false,
@@ -98,7 +104,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // تحديث آخر تسجيل دخول
     user.lastLogin = new Date();
     await user.save();
 
@@ -119,6 +124,7 @@ exports.login = async (req, res) => {
       message: 'تم تسجيل الدخول بنجاح'
     });
   } catch (error) {
+    console.error('❌ [login] error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
@@ -132,7 +138,6 @@ exports.login = async (req, res) => {
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
-    
     res.json({
       success: true,
       data: user
@@ -154,7 +159,6 @@ exports.updatePassword = async (req, res) => {
 
     const user = await User.findById(req.user._id).select('+password');
 
-    // التحقق من كلمة المرور الحالية
     const isMatch = await user.comparePassword(currentPassword);
     if (!isMatch) {
       return res.status(401).json({
