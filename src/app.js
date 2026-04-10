@@ -10,14 +10,19 @@ const app = express();
 
 // ── CORS يجب يكون قبل أي حاجة تانية ──────────────────────
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://unitmanager.netlify.app',
+    process.env.CLIENT_URL
+  ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
 app.use(cors(corsOptions));
-// app.options(); // handle preflight لكل الـ routes
+app.options('*', cors(corsOptions)); // handle preflight لكل الـ routes
 
 // ── Security & Parsing ────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: false }));
@@ -40,6 +45,7 @@ app.use('/api/backup',        require('./routes/backupRoutes'));
 // ── Health & Catch-all ────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'OK', uptime: process.uptime() }));
 app.get('/', (req, res) => res.json({ message: 'Warehouse Management API v2.0' }));
+
 // Put this AFTER all your routes, but BEFORE the errorHandler
 app.use((req, res) => {
   res.status(404).json({ 
