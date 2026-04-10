@@ -8,14 +8,14 @@ const paymentSchema = new mongoose.Schema({
   tenantName: { type: String, required: true },
 
   // ─── المبالغ ───────────────────────────────────────────────
-  amount:     { type: Number, required: true, min: 0 }, // المبلغ المطلوب الكلي
-  amountPaid: { type: Number, default: 0,     min: 0 }, // المدفوع فعلاً (يتراكم)
-  amountDue:  { type: Number, default: 0,     min: 0 }, // المتبقي = amount - amountPaid
+  amount:     { type: Number, required: true, min: 0 },
+  amountPaid: { type: Number, default: 0,     min: 0 },
+  amountDue:  { type: Number, default: 0,     min: 0 },
 
   // ─── التواريخ ──────────────────────────────────────────────
-  monthYear:   { type: String, required: true },  // "2025-01"
-  dueDate:     { type: Date,   required: true },  // يوم الاستحقاق
-  paymentDate: { type: Date,   default: null  },  // تاريخ آخر دفع فعلي
+  monthYear:   { type: String, required: true },
+  dueDate:     { type: Date,   required: true },
+  paymentDate: { type: Date,   default: null  },
 
   // ─── الحالة ───────────────────────────────────────────────
   status: {
@@ -49,15 +49,14 @@ const paymentSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-// ─── pre-save: حساب amountDue و daysOverdue ────────────────
-paymentSchema.pre('save', function (next) {
+// ✅ Fix: Mongoose v8 لا يحتاج next في الـ hooks
+paymentSchema.pre('save', function () {
   this.amountDue = Math.max(0, (this.amount || 0) - (this.amountPaid || 0));
 
   if (this.status === 'overdue' && this.dueDate) {
     const diff = Math.floor((new Date() - this.dueDate) / (1000 * 60 * 60 * 24));
     this.daysOverdue = diff > 0 ? diff : 0;
   }
-  next();
 });
 
 // ─── Indexes ──────────────────────────────────────────────
