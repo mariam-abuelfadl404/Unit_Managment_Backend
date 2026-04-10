@@ -5,6 +5,7 @@ const { body, validationResult } = require('express-validator');
 // تسجيل مستخدم جديد
 // ═══════════════════════════════════════════════════════════
 exports.validateRegister = async (req, res, next) => {
+  console.log('📌 [validateRegister] called, next type:', typeof next);
   await body('username').trim().isLength({ min: 3 })
     .withMessage('اسم المستخدم يجب أن يكون 3 أحرف على الأقل').run(req);
   await body('password').isLength({ min: 6 })
