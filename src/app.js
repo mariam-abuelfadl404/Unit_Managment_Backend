@@ -22,7 +22,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // handle preflight لكل الـ routes
+app.options('/{*path}', cors(corsOptions)); // ✅ fix for Express 5 / path-to-regexp v8+
 
 // ── Security & Parsing ────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: false }));
