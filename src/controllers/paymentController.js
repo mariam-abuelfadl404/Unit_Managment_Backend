@@ -8,37 +8,28 @@ const { generateReceiptNumber } = require('../utils/helpers');
 const { MESSAGES } = require('../config/constants');
 const moment = require('moment');
 
-// ═══════════════════════════════════════════════════════════
-// ✅ دوال تحويل الأرقام — الصدر الوحيد للحقيقة
-//
-//  toCents  : أي قيمة → قروش صحيحة (integer)
-//             "1000"  → 100000
-//             999.9999 → 100000  ✅ يصحح floating point
-//
-//  fromCents: قروش → جنيه نظيف
-//             100000 → 1000
-//             100001 → 1000.01
-// ═══════════════════════════════════════════════════════════
-const toCents = (value) => {
-  if (value === undefined || value === null || value === '') return 0;
-  const num = parseFloat(String(value).trim());
+// ─── تحويل الجنيه إلى قروش (عدد صحيح) ─────────────────────
+const toCents = (amount) => {
+  if (amount === undefined || amount === null) return 0;
+  // ✅ إصلاح: نضمن إن القيمة رقم نظيف قبل الضرب
+  const num = parseFloat(String(amount).trim());
   if (isNaN(num)) return 0;
-  return Math.round(num * 100);          // Math.round يمتص الـ floating point drift
+  return Math.round(num * 100);
 };
 
+// ─── تحويل القروش إلى جنيه (بمنزلتين عشريتين) ─────────────
 const fromCents = (cents) => {
   if (cents === undefined || cents === null) return 0;
-  return Math.round(Number(cents)) / 100; // Math.round أولاً لضمان integer نظيف
+  // ✅ إصلاح: استخدام Math.round أولاً لضمان عدد صحيح نظيف
+  return Math.round(Number(cents)) / 100;
 };
 
 // ─── تحديث حالة الدفعة بناءً على المتبقي (بالقروش) ─────────
 function updatePaymentStatus(payment) {
-  const amountCents    = toCents(payment.amount);
-  const paidCents      = toCents(payment.amountPaid || 0);
+  const amountCents = toCents(payment.amount);
+  const paidCents = toCents(payment.amountPaid || 0);
   const remainingCents = amountCents - paidCents;
-
   const newStatus = (remainingCents <= 0) ? 'paid' : 'overdue';
-
   if (payment.status !== newStatus) {
     payment.status = newStatus;
     if (newStatus === 'overdue') {
@@ -57,7 +48,7 @@ exports.recordPayment = async (req, res) => {
   try {
     const { unitId, tenantId, monthYear, paymentMethod, notes, paidBy } = req.body;
 
-    // ✅ تحويل المبلغ القادم من الـ frontend عبر toCents لضمان دقته
+    // ✅ إصلاح: تحويل المبلغ القادم من الـ frontend عبر toCents مباشرة
     const amountCents = toCents(req.body.amount);
     if (amountCents <= 0) {
       return res.status(400).json({ success: false, error: 'المبلغ يجب أن يكون رقماً أكبر من صفر' });
@@ -66,7 +57,7 @@ exports.recordPayment = async (req, res) => {
     let payment = await Payment.findOne({ unitId, tenantId, monthYear, isDeleted: { $ne: true } });
 
     if (!payment) {
-      const unit   = await Unit.findById(unitId);
+      const unit = await Unit.findById(unitId);
       const tenant = await Tenant.findById(tenantId);
       if (!unit || !tenant) {
         return res.status(404).json({ success: false, error: 'بيانات غير مكتملة' });
@@ -74,77 +65,87 @@ exports.recordPayment = async (req, res) => {
 
       const dueDate = moment(monthYear, 'YYYY-MM').date(unit.paymentDueDay || 1).toDate();
 
-      // ✅ الإيجار يُحوَّل عبر toCents/fromCents لضمان دقته
-      //    unit.monthlyRent قد يحتوي على floating point drift من MongoDB
+      // ✅ إصلاح: تمرير monthlyRent عبر toCents/fromCents لضمان دقته
       const rentCents = toCents(unit.monthlyRent);
-      const rentClean = fromCents(rentCents); // 999.9999 → 100000 → 1000.00 ✅
-
       payment = await Payment.create({
         unitId,
-        unitNumber:    unit.unitNumber,
+        unitNumber: unit.unitNumber,
         tenantId,
-        tenantName:    tenant.name,
-        amount:        rentClean,           // ✅ رقم نظيف
-        amountPaid:    0,
+        tenantName: tenant.name,
+        amount: fromCents(rentCents),
+        amountPaid: 0,
         monthYear,
         dueDate,
-        status:        'overdue',
+        status: 'overdue',
         receiptNumber: generateReceiptNumber(),
         paymentMethod,
         notes,
         paidBy,
-        receivedBy:    req.user._id
+        receivedBy: req.user._id
       });
     }
 
-    // ✅ جمع القروش كأعداد صحيحة — لا يوجد floating point هنا
+    // ✅ إصلاح: جمع القروش كأعداد صحيحة ثم التحويل مرة واحدة في النهاية
     const currentPaidCents = toCents(payment.amountPaid);
-    const newPaidCents     = currentPaidCents + amountCents;
-    payment.amountPaid     = fromCents(newPaidCents); // تحويل واحد في النهاية
-
-    payment.paymentDate   = new Date();
+    const newPaidCents = currentPaidCents + amountCents;
+    payment.amountPaid = fromCents(newPaidCents);
+    payment.paymentDate = new Date();
     payment.paymentMethod = paymentMethod || payment.paymentMethod;
-    payment.notes         = notes         || payment.notes;
-    payment.paidBy        = paidBy;
-    payment.receivedBy    = req.user._id;
+    payment.notes = notes || payment.notes;
+    payment.paidBy = paidBy;
+    payment.receivedBy = req.user._id;
 
     updatePaymentStatus(payment);
     await payment.save();
 
-    // ─── تحديث إجماليات المستأجر ──────────────────────────
+    // تحديث إجماليات المستأجر
     const tenant = await Tenant.findById(tenantId);
-    if (tenant) {
-      const tenantPaidCents = toCents(tenant.totalPaid);
-      const tenantDueCents  = toCents(tenant.totalDue);
-      const newTotalPaid    = fromCents(tenantPaidCents + amountCents);
-      tenant.totalPaid  = newTotalPaid;
-      tenant.balance    = fromCents(toCents(newTotalPaid) - tenantDueCents);
-      await tenant.save();
-    }
+    const tenantPaidCents = toCents(tenant.totalPaid);
+    const tenantDueCents = toCents(tenant.totalDue);
+    const newTenantPaidCents = tenantPaidCents + amountCents;
+    tenant.totalPaid = fromCents(newTenantPaidCents);
+    tenant.balance = fromCents(newTenantPaidCents - tenantDueCents);
+    await tenant.save();
 
     const remainingCents = toCents(payment.amount) - toCents(payment.amountPaid);
-    const remaining      = fromCents(remainingCents);
+    const remaining = fromCents(Math.max(remainingCents, 0));
 
     await ActivityLog.create({
       unitId, tenantId,
       activityType: 'payment',
-      description:  `دفعة ${monthYear} بمبلغ ${fromCents(amountCents)} جنيه - المتبقي: ${remaining}`,
-      performedBy:  req.user._id
+      description: `دفعة ${monthYear} بمبلغ ${fromCents(amountCents)} جنيه - المتبقي: ${remaining}`,
+      performedBy: req.user._id
     });
 
-    if (payment.status === 'overdue' && !payment.overdueAlertSent) {
+    // إشعار بعد كل دفعة — سواء جزئية أو كاملة
+    if (remaining > 0) {
+      // لا تزال متأخرة — أرسل إشعار بالمتبقي المحدّث
       await Notification.create({
-        type:           'overdue_payment',
-        title:          `دفعة متأخرة - وحدة ${payment.unitNumber}`,
-        message:        `المستأجر ${payment.tenantName} لم يسدد كامل إيجار ${payment.monthYear}، المتبقي ${remaining} جنيه`,
-        relatedTenant:  payment.tenantId,
-        relatedUnit:    payment.unitId,
+        type: 'overdue_payment',
+        title: `دفعة جزئية - وحدة ${payment.unitNumber}`,
+        message: `المستأجر ${payment.tenantName} دفع ${fromCents(amountCents).toLocaleString('ar-EG')} ج.م من إيجار ${payment.monthYear}، المتبقي ${remaining.toLocaleString('ar-EG')} ج.م`,
+        relatedTenant: payment.tenantId,
+        relatedUnit: payment.unitId,
         relatedPayment: payment._id,
-        severity:       'urgent'
+        severity: 'warning'
+      });
+      // نعيد overdueAlertSent لـ false حتى يُرسل إشعار عند الدفعة التالية أيضاً
+      payment.overdueAlertSent = false;
+    } else {
+      // تمّ السداد الكامل — أرسل إشعار تأكيد
+      await Notification.create({
+        type: 'payment_reminder',
+        title: `تم السداد الكامل - وحدة ${payment.unitNumber}`,
+        message: `المستأجر ${payment.tenantName} سدّد كامل إيجار ${payment.monthYear} بمبلغ ${fromCents(toCents(payment.amount)).toLocaleString('ar-EG')} ج.م`,
+        relatedTenant: payment.tenantId,
+        relatedUnit: payment.unitId,
+        relatedPayment: payment._id,
+        severity: 'info'
       });
       payment.overdueAlertSent = true;
-      await payment.save();
     }
+
+    await payment.save();
 
     res.json({ success: true, data: payment, message: 'تم تسجيل الدفعة بنجاح' });
   } catch (error) {
@@ -164,10 +165,10 @@ exports.getAllPayments = async (req, res) => {
 
     const { status, monthYear, unitId, tenantId, page = 1, limit = 20 } = req.query;
     const query = { isDeleted: { $ne: true } };
-    if (status)   query.status    = status;
-    if (monthYear)query.monthYear  = monthYear;
-    if (unitId)   query.unitId    = unitId;
-    if (tenantId) query.tenantId  = tenantId;
+    if (status) query.status = status;
+    if (monthYear) query.monthYear = monthYear;
+    if (unitId) query.unitId = unitId;
+    if (tenantId) query.tenantId = tenantId;
 
     const payments = await Payment.find(query)
       .sort({ dueDate: -1 })
@@ -187,35 +188,37 @@ exports.getAllPayments = async (req, res) => {
 exports.getMonthlyTotal = async (req, res) => {
   try {
     const targetMonth = req.query.monthYear || new Date().toISOString().slice(0, 7);
-    const payments    = await Payment.find({ monthYear: targetMonth, isDeleted: { $ne: true } });
+    const payments = await Payment.find({ monthYear: targetMonth, isDeleted: { $ne: true } });
 
     for (const p of payments) {
       if (updatePaymentStatus(p)) await p.save();
     }
 
-    // ✅ كل الحسابات بالقروش ثم التحويل مرة واحدة في النهاية
-    let totalPaidCents   = 0;
+    // ✅ إصلاح: كل الحسابات بالقروش ثم التحويل في النهاية
+    let totalPaidCents = 0;
     let totalOverdueCents = 0;
-    const counts = { paid: 0, overdue: 0 };
+    let counts = { paid: 0, overdue: 0 };
     const overdueList = [];
 
     for (const p of payments) {
-      const amountCents    = toCents(p.amount);
-      const paidCents      = toCents(p.amountPaid);
+      const amountCents = toCents(p.amount);
+      const paidCents = toCents(p.amountPaid);
       const remainingCents = amountCents - paidCents;
 
+      // ✅ المدفوع = amountPaid الفعلي دايماً (مش amount الكامل)
       totalPaidCents += paidCents;
 
       if (remainingCents <= 0) {
         counts.paid++;
       } else {
+        // ✅ المتأخر = المتبقي الفعلي بس (مش amount الكامل)
         totalOverdueCents += remainingCents;
         counts.overdue++;
         overdueList.push({
-          _id:        p._id,
+          _id: p._id,
           unitNumber: p.unitNumber,
           tenantName: p.tenantName,
-          remaining:  fromCents(remainingCents),
+          remaining: fromCents(remainingCents),
           daysOverdue: p.daysOverdue
         });
       }
@@ -224,9 +227,9 @@ exports.getMonthlyTotal = async (req, res) => {
     res.json({
       success: true,
       data: {
-        month:  targetMonth,
+        month: targetMonth,
         totals: {
-          paid:   fromCents(totalPaidCents),
+          paid: fromCents(totalPaidCents),
           overdue: fromCents(totalOverdueCents),
         },
         counts,
@@ -262,8 +265,7 @@ exports.refreshOverdue = async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 exports.getPaymentsByTenant = async (req, res) => {
   try {
-    const payments = await Payment.find({ tenantId: req.params.tenantId, isDeleted: { $ne: true } })
-      .sort({ dueDate: -1 });
+    const payments = await Payment.find({ tenantId: req.params.tenantId, isDeleted: { $ne: true } }).sort({ dueDate: -1 });
     for (const p of payments) {
       if (updatePaymentStatus(p)) await p.save();
     }
@@ -278,8 +280,7 @@ exports.getPaymentsByTenant = async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 exports.getPaymentsByUnit = async (req, res) => {
   try {
-    const payments = await Payment.find({ unitId: req.params.unitId, isDeleted: { $ne: true } })
-      .sort({ dueDate: -1 });
+    const payments = await Payment.find({ unitId: req.params.unitId, isDeleted: { $ne: true } }).sort({ dueDate: -1 });
     for (const p of payments) {
       if (updatePaymentStatus(p)) await p.save();
     }
@@ -308,13 +309,10 @@ exports.getPayment = async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 exports.updatePayment = async (req, res) => {
   try {
-    // ✅ تنظيف الأرقام قبل التحديث
-    if (req.body.amount     !== undefined) req.body.amount     = fromCents(toCents(req.body.amount));
+    // ✅ إصلاح: تمرير القيم عبر toCents/fromCents لضمان دقتها
+    if (req.body.amount !== undefined) req.body.amount = fromCents(toCents(req.body.amount));
     if (req.body.amountPaid !== undefined) req.body.amountPaid = fromCents(toCents(req.body.amountPaid));
-
-    const payment = await Payment.findByIdAndUpdate(
-      req.params.id, req.body, { new: true, runValidators: true }
-    );
+    const payment = await Payment.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!payment) return res.status(404).json({ success: false, error: 'الدفعة غير موجودة' });
     if (updatePaymentStatus(payment)) await payment.save();
     res.json({ success: true, data: payment, message: MESSAGES.SUCCESS.UPDATED });
@@ -348,14 +346,14 @@ exports.getOverduePayments = async (req, res) => {
     const payments = await Payment.find({ status: 'overdue', isDeleted: { $ne: true } })
       .sort({ dueDate: 1 });
 
+    // جلب أرقام الهاتف من Tenant دفعة واحدة
     const tenantIds = [...new Set(payments.map(p => p.tenantId?.toString()).filter(Boolean))];
     const tenants   = await Tenant.find({ _id: { $in: tenantIds } }).select('phone');
     const phoneMap  = {};
     for (const t of tenants) phoneMap[t._id.toString()] = t.phone;
 
     const data = payments.map(p => {
-      // ✅ حساب المتبقي بالقروش لضمان الدقة
-      const remainingCents = Math.max(0, toCents(p.amount) - toCents(p.amountPaid || 0));
+      const remainingCents = toCents(p.amount) - toCents(p.amountPaid || 0);
       return {
         _id:         p._id,
         unitNumber:  p.unitNumber,
@@ -364,7 +362,7 @@ exports.getOverduePayments = async (req, res) => {
         tenantPhone: phoneMap[p.tenantId?.toString()] || null,
         amount:      p.amount,
         amountPaid:  p.amountPaid,
-        remaining:   fromCents(remainingCents),
+        remaining:   fromCents(Math.max(remainingCents, 0)),
         monthYear:   p.monthYear,
         dueDate:     p.dueDate,
         daysOverdue: p.daysOverdue
