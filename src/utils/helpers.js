@@ -62,3 +62,38 @@ exports.sanitizeData = (data, allowedFields) => {
   });
   return sanitized;
 };
+
+// ═══════════════════════════════════════════════════════════
+// ✅ تنظيف الأرقام المالية — الحل الجذري لمشكلة floating point
+//
+// الفكرة: كل رقم مالي يُحوَّل إلى قروش (integer) ثم يُعاد
+// تحويله إلى جنيه. هذا يضمن عدم وجود كسور خفية مثل:
+//   999.9999999 → 100000 قرش → 1000.00 جنيه ✅
+//
+// الاستخدام:
+//   safeAmount(1000)        → 1000
+//   safeAmount(999.9999)    → 1000
+//   safeAmount("1000.005")  → 1000.01
+//   safeAmount(null)        → 0
+// ═══════════════════════════════════════════════════════════
+exports.safeAmount = (value) => {
+  if (value === null || value === undefined || value === '') return 0;
+  const num = parseFloat(String(value).trim());
+  if (isNaN(num)) return 0;
+  // تحويل إلى قروش كـ integer ثم إرجاعه كجنيه
+  return Math.round(num * 100) / 100;
+};
+
+// ─── تحويل أي قيمة إلى قروش (integer) ───────────────────
+exports.toCents = (value) => {
+  if (value === null || value === undefined || value === '') return 0;
+  const num = parseFloat(String(value).trim());
+  if (isNaN(num)) return 0;
+  return Math.round(num * 100);
+};
+
+// ─── تحويل القروش إلى جنيه ───────────────────────────────
+exports.fromCents = (cents) => {
+  if (cents === null || cents === undefined) return 0;
+  return Math.round(Number(cents)) / 100;
+};
