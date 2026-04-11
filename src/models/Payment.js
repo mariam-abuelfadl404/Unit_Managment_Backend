@@ -1,5 +1,13 @@
 const mongoose = require('mongoose');
 
+// ─── دالة تنظيف الأرقام المالية ──────────────────────────
+const safeAmount = (value) => {
+  if (value === null || value === undefined) return 0;
+  const num = parseFloat(String(value).trim());
+  if (isNaN(num)) return 0;
+  return Math.round(num * 100) / 100;
+};
+
 const paymentSchema = new mongoose.Schema({
   // ─── الوحدة والمستأجر ─────────────────────────────────────
   unitId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Unit', required: true },
@@ -7,10 +15,10 @@ const paymentSchema = new mongoose.Schema({
   tenantId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
   tenantName: { type: String, required: true },
 
-  // ─── المبالغ ───────────────────────────────────────────────
-  amount:     { type: Number, required: true, min: 0 },
-  amountPaid: { type: Number, default: 0,     min: 0 },
-  amountDue:  { type: Number, default: 0,     min: 0 },
+  // ─── المبالغ — ✅ setter على كل حقل مالي لمنع floating point error
+  amount:     { type: Number, required: true, min: 0, set: safeAmount },
+  amountPaid: { type: Number, default: 0,     min: 0, set: safeAmount },
+  amountDue:  { type: Number, default: 0,     min: 0, set: safeAmount },
 
   // ─── التواريخ ──────────────────────────────────────────────
   monthYear:   { type: String, required: true },
@@ -49,9 +57,13 @@ const paymentSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-// ✅ Fix: Mongoose v8 لا يحتاج next في الـ hooks
+// ✅ pre-save hook — يستخدم القروش لحسابات دقيقة 100%
 paymentSchema.pre('save', function () {
-  this.amountDue = Math.max(0, (this.amount || 0) - (this.amountPaid || 0));
+  // حساب amountDue بالقروش ثم التحويل
+  const amountCents    = Math.round((this.amount    || 0) * 100);
+  const amountPaidCents = Math.round((this.amountPaid || 0) * 100);
+  const dueCents       = Math.max(0, amountCents - amountPaidCents);
+  this.amountDue = dueCents / 100;
 
   if (this.status === 'overdue' && this.dueDate) {
     const diff = Math.floor((new Date() - this.dueDate) / (1000 * 60 * 60 * 24));
