@@ -2,8 +2,6 @@
 const cron               = require('node-cron');
 const moment             = require('moment');
 const NotificationService = require('./notificationService');
-const BackupService       = require('./backupService');
-const User                = require('../models/User');
 const Unit                = require('../models/Block');
 const Payment             = require('../models/Payment');
 const Notification        = require('../models/Notification');
@@ -31,9 +29,9 @@ class ScheduleService {
       catch (e) { console.error('❌ تنبيهات العقود:', e.message); }
     });
 
-    // 4. كل يوم 2 صباحاً — نسخة احتياطية + إشعار تقرير يومي
+    // 4. كل يوم 2 صباحاً — إشعار التقرير اليومي
     cron.schedule('0 2 * * *', async () => {
-      await this.runDailyBackupAndReport();
+      await this.runDailyReport();
     });
 
     // 5. كل يوم 4 عصراً — الملخص اليومي
@@ -73,33 +71,18 @@ class ScheduleService {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // نسخة احتياطية يومية + إشعار التقرير اليومي
+  // إشعار التقرير اليومي
   // ═══════════════════════════════════════════════════════════
-  static async runDailyBackupAndReport() {
+  static async runDailyReport() {
     const today = moment().format('YYYY-MM-DD');
-    console.log(`🔄 النسخة الاحتياطية اليومية + التقرير - ${today}`);
+    console.log(`📊 إشعار التقرير اليومي - ${today}`);
 
-    // ── 1. نسخة احتياطية ────────────────────────────────────
-    try {
-      const backup = await BackupService.createBackup();
-      console.log(`✅ نسخة احتياطية: ${backup.filename} (${backup.size})`);
-    } catch (e) {
-      console.error('❌ النسخ الاحتياطي:', e.message);
-      await Notification.create({
-        type:     'system',
-        title:    '⚠️ فشل النسخ الاحتياطي',
-        message:  `فشل إنشاء النسخة الاحتياطية ليوم ${today}: ${e.message}`,
-        severity: 'urgent'
-      });
-    }
-
-    // ── 2. إحصائيات اليوم ───────────────────────────────────
     try {
       const stats = await this._getDailyStats(today);
 
       await Notification.create({
         type:    'system',
-        title:   `📊 التقرير اليومي جاهز — ${moment().format('DD/MM/YYYY')}`,
+        title:   `📊 التقرير اليومي — ${moment().format('DD/MM/YYYY')}`,
         message: [
           `📥 دفعات اليوم: ${stats.paidToday} دفعة — إجمالي ${stats.paidAmount.toLocaleString('ar-EG')} ج.م`,
           `⚠️ دفعات متأخرة: ${stats.overdueCount} دفعة — ${stats.overdueAmount.toLocaleString('ar-EG')} ج.م`,
@@ -199,10 +182,10 @@ class ScheduleService {
     const occupancyRate = totalUnits > 0 ? ((occupiedUnits / totalUnits) * 100).toFixed(1) : 0;
 
     return {
-      paidToday:      paidAgg[0]?.count    || 0,
-      paidAmount:     paidAgg[0]?.total    || 0,
-      overdueCount:   overdueAgg[0]?.count || 0,
-      overdueAmount:  overdueAgg[0]?.total || 0,
+      paidToday:     paidAgg[0]?.count    || 0,
+      paidAmount:    paidAgg[0]?.total    || 0,
+      overdueCount:  overdueAgg[0]?.count || 0,
+      overdueAmount: overdueAgg[0]?.total || 0,
       totalUnits,
       occupiedUnits,
       occupancyRate,
@@ -216,23 +199,22 @@ class ScheduleService {
     const nextMonth = moment().add(1, 'month').format('YYYY-MM');
     console.log(`💰 توليد دفعات شهر ${nextMonth}...`);
 
-    // تحديث المتأخرات أولاً
     const today = new Date();
     await Payment.updateMany(
       { status: { $in: ['pending', 'partial'] }, dueDate: { $lt: today } },
       { $set: { status: 'overdue' } }
     );
 
-    const units   = await Unit.find({ status: 'occupied' });
-    let created   = 0;
-    let skipped   = 0;
+    const units  = await Unit.find({ status: 'occupied' });
+    let created  = 0;
+    let skipped  = 0;
 
     for (const unit of units) {
       if (!unit.currentTenant) continue;
 
       const exists = await Payment.findOne({
-        unitId:   unit._id,
-        tenantId: unit.currentTenant,
+        unitId:    unit._id,
+        tenantId:  unit.currentTenant,
         monthYear: nextMonth
       });
 
@@ -269,31 +251,24 @@ class ScheduleService {
   // فحص صحة النظام
   // ═══════════════════════════════════════════════════════════
   static async runHealthCheck() {
-    const checks = { database: false, backups: false };
+    const User = require('../models/User');
+    let dbOk = false;
 
     try {
       await User.countDocuments();
-      checks.database = true;
+      dbOk = true;
     } catch (e) { console.error('❌ فحص قاعدة البيانات:', e.message); }
 
-    try {
-      const backups  = await BackupService.listBackups();
-      checks.backups = backups.length > 0;
-    } catch (e) { console.error('❌ فحص النسخ الاحتياطية:', e.message); }
-
-    const allPassed = Object.values(checks).every(Boolean);
-
-    if (!allPassed) {
-      const failed = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k);
+    if (!dbOk) {
       await NotificationService.createNotification({
         type:     'system',
         title:    '⚠️ تحذير: فحص النظام',
-        message:  `فشل في: ${failed.join(', ')}`,
+        message:  'فشل الاتصال بقاعدة البيانات',
         severity: 'warning'
       });
     }
 
-    return { success: allPassed, checks, timestamp: new Date() };
+    return { success: dbOk, timestamp: new Date() };
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -302,8 +277,7 @@ class ScheduleService {
   static async runTaskManually(taskName) {
     console.log(`▶️ تشغيل يدوي: ${taskName}`);
     switch (taskName) {
-      case 'backup':               return await BackupService.createBackup();
-      case 'dailyReport':          return await this.runDailyBackupAndReport();
+      case 'dailyReport':          return await this.runDailyReport();
       case 'weeklyReport':         return await this.notifyWeeklyReport();
       case 'monthlyReport':        return await this.notifyMonthlyReport();
       case 'paymentReminders':     return await NotificationService.checkUpcomingPayments();
@@ -326,15 +300,15 @@ class ScheduleService {
   // ── حالة المهام ──────────────────────────────────────────
   static getStatus() {
     return [
-      { name: 'تذكير الدفعات',        schedule: '0 9 * * *'   },
-      { name: 'إنذارات المتأخرات',     schedule: '0 10 * * *'  },
-      { name: 'تنبيهات العقود',        schedule: '0 11 * * *'  },
-      { name: 'نسخ احتياطي + تقرير يومي', schedule: '0 2 * * *' },
-      { name: 'الملخص اليومي',         schedule: '0 16 * * *'  },
-      { name: 'دفعات + تقرير شهري',    schedule: '0 6 1 * *'   },
-      { name: 'التقرير الاسبوعي',      schedule: '0 8 * * 1'   },
-      { name: 'تنظيف الإشعارات',       schedule: '0 8 * * 6'   },
-      { name: 'فحص الصحة',             schedule: '0 */6 * * *' }
+      { name: 'تذكير الدفعات',         schedule: '0 9 * * *'   },
+      { name: 'إنذارات المتأخرات',      schedule: '0 10 * * *'  },
+      { name: 'تنبيهات العقود',         schedule: '0 11 * * *'  },
+      { name: 'إشعار التقرير اليومي',   schedule: '0 2 * * *'   },
+      { name: 'الملخص اليومي',          schedule: '0 16 * * *'  },
+      { name: 'دفعات + تقرير شهري',     schedule: '0 6 1 * *'   },
+      { name: 'التقرير الاسبوعي',       schedule: '0 8 * * 1'   },
+      { name: 'تنظيف الإشعارات',        schedule: '0 8 * * 6'   },
+      { name: 'فحص الصحة',              schedule: '0 */6 * * *' }
     ];
   }
 }
