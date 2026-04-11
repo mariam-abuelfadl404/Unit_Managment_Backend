@@ -262,10 +262,23 @@ exports.getUnitReport = async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 exports.getNotes = async (req, res) => {
   try {
+    const unit = await Unit.findById(req.params.unitId).select('currentTenant');
+
+    // جلب كل الملاحظات المرتبطة بالوحدة
     const notes = await UnitNote.find({ unitId: req.params.unitId })
       .populate('createdBy', 'fullName')
       .sort({ date: -1, createdAt: -1 });
-    res.json({ success: true, data: notes });
+
+    // إضافة حقل isCurrent لكل ملاحظة حتى الفرونت يعرف يفصلها
+    const currentTenantId = unit?.currentTenant?.toString();
+    const enriched = notes.map(n => ({
+      ...n.toObject(),
+      isCurrent: currentTenantId
+        ? n.tenantId?.toString() === currentTenantId
+        : true   // لو الوحدة فارغة — ما نخبيش أي حاجة
+    }));
+
+    res.json({ success: true, data: enriched });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -278,7 +291,6 @@ exports.addNote = async (req, res) => {
   try {
     const { date, text, parcelCount, cargoType, importFrom, exportTo } = req.body;
 
-    // يجب أن يكون هناك نص أو حركة مخزن على الأقل
     const hasMovement = parcelCount || cargoType || importFrom || exportTo;
     if (!date || (!text?.trim() && !hasMovement)) {
       return res.status(400).json({
@@ -287,21 +299,24 @@ exports.addNote = async (req, res) => {
       });
     }
 
+    // جلب المستأجر الحالي للوحدة لربط الملاحظة به
+    const unit = await Unit.findById(req.params.unitId).select('currentTenant');
+
     const note = await UnitNote.create({
-      unitId:     req.params.unitId,
+      unitId:      req.params.unitId,
+      tenantId:    unit?.currentTenant || null,
       date,
-      text:       text?.trim() || '',
+      text:        text?.trim() || '',
       parcelCount: parcelCount ? Number(parcelCount) : null,
-      cargoType:  cargoType   || null,
-      importFrom: importFrom  || null,
-      exportTo:   exportTo    || null,
-      createdBy:  req.user._id
+      cargoType:   cargoType   || null,
+      importFrom:  importFrom  || null,
+      exportTo:    exportTo    || null,
+      createdBy:   req.user._id
     });
 
-    // populate createdBy قبل الإرجاع
     await note.populate('createdBy', 'fullName');
 
-    res.status(201).json({ success: true, data: note });
+    res.status(201).json({ success: true, data: { ...note.toObject(), isCurrent: true } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
