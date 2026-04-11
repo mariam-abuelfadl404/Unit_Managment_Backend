@@ -1,5 +1,14 @@
 const mongoose = require('mongoose');
 
+// ─── دالة تنظيف الأرقام المالية ──────────────────────────
+// تضمن إن أي رقم مالي يُخزَّن بدون floating point error
+const safeAmount = (value) => {
+  if (value === null || value === undefined) return 0;
+  const num = parseFloat(String(value).trim());
+  if (isNaN(num)) return 0;
+  return Math.round(num * 100) / 100;
+};
+
 const unitSchema = new mongoose.Schema({
   unitNumber: {
     type: String,
@@ -17,9 +26,12 @@ const unitSchema = new mongoose.Schema({
     enum: ['empty', 'occupied'],
     default: 'empty'
   },
+
+  // ✅ إضافة setter لضمان تخزين الإيجار بدون floating point error
   monthlyRent: {
     type: Number,
-    default: 0
+    default: 0,
+    set: safeAmount
   },
 
   currentTenant: {
@@ -71,20 +83,17 @@ const unitSchema = new mongoose.Schema({
     tenantName: String,
     startDate: Date,
     endDate: Date,
-    monthlyRent: Number,
-    totalPaid: Number,
-    totalDue: Number,
-    balance: Number,
+    // ✅ setter للأرقام المالية في تاريخ الإيجار
+    monthlyRent: { type: Number, set: safeAmount },
+    totalPaid:   { type: Number, set: safeAmount },
+    totalDue:    { type: Number, set: safeAmount },
+    balance:     { type: Number, set: safeAmount },
     notes: String
   }],
 
   notes: String
 }, { timestamps: true });
 
-// ❌ شيل دي
-// unitSchema.index({ unitNumber: 1 });
-
-// ✅ سيبي الباقي عادي
 unitSchema.index({ status: 1 });
 unitSchema.index({ currentTenant: 1 });
 unitSchema.index({ rentalEndDate: 1 });
