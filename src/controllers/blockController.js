@@ -175,7 +175,7 @@ exports.endRental = async (req, res) => {
       endDate:     rentalEnd,
       monthlyRent: unit.monthlyRent,
       totalPaid, totalDue, balance,
-      notes
+      notes: unit.notes || notes || null   // احفظ ملاحظة بداية الإيجار في الأرشيف
     });
 
     const prevTenantId   = unit.currentTenant;
@@ -190,6 +190,7 @@ exports.endRental = async (req, res) => {
     unit.rentalEndDate      = null;
     unit.cargoType          = null;
     unit.hasLock            = false;
+    unit.notes              = null;
     await unit.save();
 
     if (tenant) {
