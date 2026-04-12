@@ -275,7 +275,7 @@ exports.getNotes = async (req, res) => {
       ...n.toObject(),
       isCurrent: currentTenantId
         ? n.tenantId?.toString() === currentTenantId
-        : true   // لو الوحدة فارغة — ما نخبيش أي حاجة
+        : false  // لو الوحدة فارغة — كل الملاحظات تخص مستأجرين سابقين
     }));
 
     res.json({ success: true, data: enriched });
