@@ -175,7 +175,7 @@ exports.endRental = async (req, res) => {
       endDate:     rentalEnd,
       monthlyRent: unit.monthlyRent,
       totalPaid, totalDue, balance,
-      notes: unit.notes || notes || null   // احفظ ملاحظة بداية الإيجار في الأرشيف
+      notes
     });
 
     const prevTenantId   = unit.currentTenant;
@@ -190,7 +190,6 @@ exports.endRental = async (req, res) => {
     unit.rentalEndDate      = null;
     unit.cargoType          = null;
     unit.hasLock            = false;
-    unit.notes              = null;
     await unit.save();
 
     if (tenant) {
@@ -276,7 +275,7 @@ exports.getNotes = async (req, res) => {
       ...n.toObject(),
       isCurrent: currentTenantId
         ? n.tenantId?.toString() === currentTenantId
-        : false  // لو الوحدة فارغة — كل الـ notes تبقى أرشيف
+        : true   // لو الوحدة فارغة — ما نخبيش أي حاجة
     }));
 
     res.json({ success: true, data: enriched });
